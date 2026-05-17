@@ -266,7 +266,7 @@ export class DashboardPanel {
     if (!isRequestMessage(msg)) return;
 
     // Open external URLs from webview
-    if ((msg.method as string) === 'openExternal') {
+    if (msg.method === 'openExternal') {
       const url = (msg.params as Record<string, unknown> | undefined)?.url;
       if (typeof url === 'string') {
         void vscode.env.openExternal(vscode.Uri.parse(url));
