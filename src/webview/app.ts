@@ -11,6 +11,7 @@ import { $, $$, rpc, destroyCharts, initMessageListener, withErrorBoundary, type
 import { updateTelemetry } from './telemetry-strip';
 import { formatStatCount } from './loading-grid-model';
 import { renderWorkspaceGrid, updateWorkspaceCell } from './loading-grid-view';
+import { buildSkippedBanner } from './skipped-banner';
 import { html, render, unmount, ComponentChildren } from './render';
 import { renderDashboard } from './page-dashboard';
 import { renderPatterns } from './page-patterns';
@@ -329,36 +330,9 @@ function maybeShowSkippedBanner(): void {
   const col = document.getElementById('content-col');
   if (!content || !col) return;
 
-  const fileLabel = `${lastSkippedFiles} file${lastSkippedFiles === 1 ? '' : 's'}`;
-  const lineLabel = lastSkippedLines > 0 ? `, ${lastSkippedLines} line${lastSkippedLines === 1 ? '' : 's'}` : '';
-
-  const banner = document.createElement('div');
-  banner.id = 'skipped-banner';
-  banner.className = 'skipped-banner';
-  banner.setAttribute('role', 'status');
-
-  const icon = document.createElement('span');
-  icon.className = 'skipped-banner-icon';
-  icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = '⚠';
-
-  const text = document.createElement('span');
-  text.className = 'skipped-banner-text';
-  text.textContent = `Some history was skipped while parsing (${fileLabel}${lineLabel}). Results may be incomplete.`;
-
-  const details = document.createElement('button');
-  details.className = 'skipped-banner-link';
-  details.type = 'button';
-  details.textContent = 'View details';
-  details.addEventListener('click', () => { void rpc('showOutput'); });
-
-  const dismiss = document.createElement('button');
-  dismiss.className = 'skipped-banner-dismiss';
-  dismiss.setAttribute('aria-label', 'Dismiss');
-  dismiss.textContent = '×';
-  dismiss.addEventListener('click', () => banner.remove());
-
-  banner.append(icon, text, details, dismiss);
+  const banner = buildSkippedBanner(lastSkippedFiles, lastSkippedLines, {
+    onViewDetails: () => { void rpc('showOutput'); },
+  });
   col.insertBefore(banner, content);
 }
 

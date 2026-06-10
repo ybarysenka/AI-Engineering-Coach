@@ -18,6 +18,17 @@ import type { LoadProgress, ProgressCallback } from './parser';
 const WORKER_MAX_OLD_SPACE_MB = 4096;
 const RETRY_WORKER_MAX_OLD_SPACE_MB = 6144;
 
+/** child_process.fork, narrowed to what the host uses. Injectable so the orchestration can be
+ *  unit-tested against a fake child without spawning a real process. */
+type ForkFn = typeof import('child_process').fork;
+
+/** A worker failure is retryable (worth a second attempt at a higher heap ceiling) only when it
+ *  looks like an out-of-memory / hard-abort death, not a deterministic parse error that would
+ *  fail again. Kept pure and exported so the retry decision is unit-testable (issue #106). */
+export function isRetryableWorkerError(message: string): boolean {
+  return /heap out of memory|memory limit|sigabrt|sigkill|exited with code/i.test(message.toLowerCase());
+}
+
 /** The worker's `done` message is the chunking done payload plus worker-only dir fingerprints. */
 type WorkerDoneMessagePayload = WorkerDonePayload & {
   dirMetas: DirMetas;
@@ -39,13 +50,18 @@ function logParseWarnings(warnings: ParseWarning[] | undefined): void {
 export async function parseAllLogsViaWorker(
   logsDirs: string[],
   onProgress?: ProgressCallback,
+  deps?: { fork?: ForkFn },
 ): Promise<ParseResult> {
-  let forkFn: typeof import('child_process').fork;
-  try {
-    ({ fork: forkFn } = await import('child_process'));
-  } catch {
-    runtimeDebug('parser', 'child-process-unavailable');
-    throw new Error('child process parsing is unavailable on this runtime');
+  let forkFn: ForkFn;
+  if (deps?.fork) {
+    forkFn = deps.fork;
+  } else {
+    try {
+      ({ fork: forkFn } = await import('child_process'));
+    } catch {
+      runtimeDebug('parser', 'child-process-unavailable');
+      throw new Error('child process parsing is unavailable on this runtime');
+    }
   }
 
   const workerPath = path.join(__dirname, 'parse-worker.js');
@@ -172,8 +188,7 @@ export async function parseAllLogsViaWorker(
     return await runChildAttempt(WORKER_MAX_OLD_SPACE_MB, 1);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const retryable = /heap out of memory|memory limit|sigabrt|sigkill|exited with code/i.test(message.toLowerCase());
-    if (!retryable) throw error;
+    if (!isRetryableWorkerError(message)) throw error;
     runtimeDebug('parser', 'child-retry', `reason=${message} maxOldSpaceMb=${RETRY_WORKER_MAX_OLD_SPACE_MB}`);
     return runChildAttempt(RETRY_WORKER_MAX_OLD_SPACE_MB, 2);
   }

@@ -11,6 +11,7 @@
 import { parentPort } from 'worker_threads';
 import { stripSessionsForMemory } from './cache';
 import { emitResultChunks, DEFAULT_SESSION_CHUNK_SIZE } from './parse-chunking';
+import { createAckWindow, shouldSendProgressImmediately } from './parse-worker-stream';
 import { parseAllLogsAsyncDetailed, type LoadProgress } from './parser';
 import { getParseWarningCounts, getParseWarnings } from './parser-shared';
 import { installRuntimeDebugHooks, runtimeDebug } from './runtime-debug';
@@ -127,7 +128,7 @@ onMessage(async (msg) => {
       const progressMessage: ProgressMessage = { type: 'progress', progress };
       const now = Date.now();
       // Always send immediately for phase changes, workspace grid updates, or >= 100%.
-      if (progress.phase !== lastPhase || progress.workspacePlan || progress.workspaceDone || progress.pct >= 100) {
+      if (shouldSendProgressImmediately(progress, lastPhase)) {
         flushPending();
         send(progressMessage);
         lastPhase = progress.phase;
@@ -161,14 +162,8 @@ onMessage(async (msg) => {
     // CHUNK_ACK_WINDOW chunks unacked so serialized payloads cannot accumulate in the child's
     // native IPC write buffer (the native OOM that V8 heap limits could not prevent).
     let nextSeq = 0;
-    let highestAcked = -1;
-    let ackWaiter: (() => void) | null = null;
-    onAck = (seq) => {
-      if (seq > highestAcked) highestAcked = seq;
-      const resume = ackWaiter;
-      ackWaiter = null;
-      resume?.();
-    };
+    const ackWindow = createAckWindow(CHUNK_ACK_WINDOW);
+    onAck = (seq) => ackWindow.onAck(seq);
 
     const done = await emitResultChunks(
       result,
@@ -180,9 +175,7 @@ onMessage(async (msg) => {
         // heap instead and never acks, so waiting there would deadlock (issue #106).
         if (port) return;
         // Pause while the window is full; each ack from the parent re-checks the condition.
-        while (seq - highestAcked >= CHUNK_ACK_WINDOW) {
-          await new Promise<void>((resolve) => { ackWaiter = resolve; });
-        }
+        await ackWindow.waitForSlot(seq);
       },
       SESSION_CHUNK_SIZE,
     );

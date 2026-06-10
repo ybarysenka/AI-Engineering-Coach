@@ -79,3 +79,25 @@ describe('initMessageListener progress forwarding', () => {
     expect(arg.telemetry).toBeUndefined();
   });
 });
+
+describe('initMessageListener dataReady forwarding', () => {
+  it('forwards authoritative skipped counts from the dataReady payload', async () => {
+    const { initMessageListener } = await import('./shared');
+    const onDataReady = vi.fn();
+    initMessageListener(() => { /* noop */ }, onDataReady);
+
+    dispatch({ type: 'dataReady', currentWorkspace: 'my-app', skippedFiles: 3, skippedLines: 42 });
+
+    expect(onDataReady).toHaveBeenCalledWith('my-app', { skippedFiles: 3, skippedLines: 42 });
+  });
+
+  it('defaults skipped counts to zero when the payload omits them', async () => {
+    const { initMessageListener } = await import('./shared');
+    const onDataReady = vi.fn();
+    initMessageListener(() => { /* noop */ }, onDataReady);
+
+    dispatch({ type: 'dataReady', currentWorkspace: 'my-app' });
+
+    expect(onDataReady).toHaveBeenCalledWith('my-app', { skippedFiles: 0, skippedLines: 0 });
+  });
+});
