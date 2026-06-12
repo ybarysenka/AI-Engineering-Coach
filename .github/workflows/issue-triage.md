@@ -10,6 +10,9 @@ on:
   issues:
     types: [opened, reopened]
   reaction: eyes
+  # Allow triage to run for issues opened by anyone, including users
+  # without write access (the typical case for external issue authors).
+  roles: all
 
 permissions: read-all
 
